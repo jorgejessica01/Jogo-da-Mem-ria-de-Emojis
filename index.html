@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jogo da Memória de Emojis</title>
+    <!-- Carregando Tailwind CSS para um estilo moderno e responsivo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Configurações básicas e fontes */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        /* Estilo para o cartão (Card) */
+        .card {
+            width: 100%;
+            height: 100%;
+            aspect-ratio: 1 / 1; /* Garante que os cartões são quadrados */
+            cursor: pointer;
+            perspective: 1000px;
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+            position: relative;
+            user-select: none;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+        }
+
+        /* Classes para a face frontal e traseira */
+        .card-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: clamp(2rem, 8vw, 4rem); /* Tamanho do emoji responsivo */
+            border-radius: 0.75rem;
+            transition: background-color 0.3s, transform 0.6s;
+        }
+
+        /* Face Traseira (Virada para baixo) */
+        .card-back {
+            background-color: #4f46e5; /* Indigo-600 */
+            color: white;
+            transform: rotateY(0deg);
+            background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
+            border: 3px solid #6366f1;
+        }
+
+        /* Efeito de virar o cartão */
+        .card.is-flipped .card-back {
+            transform: rotateY(180deg);
+        }
+
+        /* Face Frontal (Emoji, virada para cima) */
+        .card-front {
+            background-color: #ffffff;
+            transform: rotateY(180deg);
+        }
+
+        /* Efeito de virar o cartão */
+        .card.is-flipped .card-front {
+            transform: rotateY(0deg);
+        }
+
+        /* Cartões que já foram combinados */
+        .card.is-matched .card-back {
+            background-color: #10b981; /* Emerald-500 */
+            background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+        }
+
+        /* Impedir cliques em cartões já virados/combinados */
+        .card.is-flipped {
+            pointer-events: none;
+        }
+
+        .card-grid {
+            /* 4 colunas em telas pequenas, 4 colunas em telas maiores */
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px; /* Espaçamento entre os cartões */
+        }
+
+        /* Mensagem de sucesso/vitória */
+        #status-message {
+            transition: opacity 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <div id="app" class="max-w-xl w-full p-4 md:p-8 bg-white rounded-2xl shadow-2xl">
+        <h1 class="text-3xl font-extrabold text-indigo-700 text-center mb-2">Jogo da Memória Emoji</h1>
+        <p class="text-gray-500 text-center mb-6">Encontre os pares!</p>
+
+        <!-- Mensagens de Status -->
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6 p-3 bg-indigo-50 rounded-lg border-l-4 border-indigo-400">
+            <div id="attempts-display" class="text-lg font-medium text-indigo-700 mb-2 md:mb-0">
+                Tentativas: 0
+            </div>
+            <div id="status-message" class="text-lg font-semibold text-green-600 opacity-0 transition-opacity duration-500">
+                Parabéns! Você venceu!
+            </div>
+            <button id="restart-button" class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow hover:bg-indigo-700 transition duration-300">
+                Reiniciar
+            </button>
+        </div>
+
+        <!-- Grid do Jogo -->
+        <div id="game-grid" class="card-grid grid">
+            <!-- Os cartões serão inseridos aqui pelo JavaScript -->
+        </div>
+
+        <!-- Mensagem de vitória (Modal/Caixa de Mensagem customizada) -->
+        <div id="win-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden transition-opacity duration-300">
+            <div class="bg-white p-8 rounded-xl shadow-2xl max-w-sm text-center transform transition-transform duration-300 scale-95">
+                <div class="text-6xl mb-4">🎉</div>
+                <h2 class="text-3xl font-bold text-indigo-600 mb-2">Vitória!</h2>
+                <p class="text-gray-600 mb-4">Você encontrou todos os pares em <span id="final-attempts" class="font-bold text-indigo-500">0</span> tentativas.</p>
+                <button id="modal-restart-button" class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-lg hover:bg-indigo-700 transition duration-300">
+                    Jogar Novamente
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Variáveis globais para o estado do jogo
+        const EMOJIS = ['❤️', '✨', '✅', '😂', '⭐', '🌼'];
+        let gameBoard = [];
+        let flippedCards = [];
+        let matchedPairs = 0;
+        let attempts = 0;
+        let lockBoard = false; // Impede cliques enquanto 2 cartas estão viradas
+
+        // Referências aos elementos do DOM
+        const gameGrid = document.getElementById('game-grid');
+        const attemptsDisplay = document.getElementById('attempts-display');
+        const statusMessage = document.getElementById('status-message');
+        const winModal = document.getElementById('win-modal');
+        const finalAttempts = document.getElementById('final-attempts');
+
+        // Função para embaralhar um array (Algoritmo Fisher-Yates)
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        // Função para inicializar o jogo
+        function initializeGame() {
+            // 1. Criar o tabuleiro duplicando os emojis
+            gameBoard = [...EMOJIS, ...EMOJIS];
+            
+            // 2. Embaralhar
+            shuffle(gameBoard);
+
+            // 3. Resetar o estado
+            flippedCards = [];
+            matchedPairs = 0;
+            attempts = 0;
+            lockBoard = false;
+            attemptsDisplay.textContent = 'Tentativas: 0';
+            statusMessage.classList.add('opacity-0');
+            winModal.classList.add('hidden');
+            
+            // 4. Renderizar os cartões
+            renderCards();
+        }
+
+        // Função para renderizar os cartões no DOM
+        function renderCards() {
+            gameGrid.innerHTML = ''; // Limpa o grid
+            gameBoard.forEach((emoji, index) => {
+                const cardElement = document.createElement('div');
+                cardElement.classList.add('card');
+                cardElement.dataset.emoji = emoji;
+                cardElement.dataset.index = index;
+                cardElement.innerHTML = `
+                    <div class="card-face card-back">?</div>
+                    <div class="card-face card-front">${emoji}</div>
+                `;
+                
+                // Adiciona o listener de clique
+                cardElement.addEventListener('click', () => handleCardClick(cardElement));
+                
+                gameGrid.appendChild(cardElement);
+            });
+        }
+
+        // Função principal de manipulação de clique no cartão
+        function handleCardClick(cardElement) {
+            // Se o tabuleiro estiver bloqueado ou o cartão já estiver virado, ignora o clique
+            if (lockBoard || cardElement.classList.contains('is-flipped')) {
+                return;
+            }
+
+            // 1. Virar o cartão
+            cardElement.classList.add('is-flipped');
+            flippedCards.push(cardElement);
+
+            // 2. Lógica para 1 ou 2 cartões virados
+            if (flippedCards.length === 1) {
+                // Primeira carta virada, apenas espera
+                return;
+            }
+
+            // 3. Segunda carta virada - Bloqueia o tabuleiro e incrementa tentativas
+            lockBoard = true;
+            attempts++;
+            attemptsDisplay.textContent = `Tentativas: ${attempts}`;
+
+            const [card1, card2] = flippedCards;
+
+            if (card1.dataset.emoji === card2.dataset.emoji) {
+                // É um PAR!
+                handleMatch();
+            } else {
+                // Não é um par
+                handleMismatch();
+            }
+        }
+
+        // Função executada quando há um par
+        function handleMatch() {
+            const [card1, card2] = flippedCards;
+            
+            // Marca como combinado, mantendo-os virados
+            card1.classList.add('is-matched');
+            card2.classList.add('is-matched');
+
+            // Remove os listeners para que não possam ser clicados novamente (embora `pointer-events: none` ajude)
+            card1.removeEventListener('click', handleCardClick);
+            card2.removeEventListener('click', handleCardClick);
+
+            matchedPairs++;
+            resetBoard();
+            
+            // Checa condição de vitória
+            if (matchedPairs === EMOJIS.length) {
+                setTimeout(checkWin, 500); // Dá um pequeno atraso para a animação
+            }
+        }
+
+        // Função executada quando NÃO há um par
+        function handleMismatch() {
+            // Desbloqueia o tabuleiro após 1.5 segundos e vira as cartas de volta
+            setTimeout(() => {
+                flippedCards.forEach(card => card.classList.remove('is-flipped'));
+                resetBoard();
+            }, 1500);
+        }
+
+        // Função para resetar as variáveis de controle do tabuleiro
+        function resetBoard() {
+            [flippedCards, lockBoard] = [[], false];
+        }
+
+        // Função para verificar e exibir a vitória
+        function checkWin() {
+            finalAttempts.textContent = attempts;
+            winModal.classList.remove('hidden');
+            // Animação do modal
+            setTimeout(() => {
+                winModal.querySelector('div').classList.remove('scale-95');
+            }, 50);
+        }
+
+        // --- Inicialização e Listeners ---
+        
+        // Inicializa o jogo ao carregar a página
+        window.onload = initializeGame;
+
+        // Listener para o botão de Reiniciar no painel
+        document.getElementById('restart-button').addEventListener('click', () => {
+            initializeGame();
+        });
+
+        // Listener para o botão de Reiniciar no modal de vitória
+        document.getElementById('modal-restart-button').addEventListener('click', () => {
+            initializeGame();
+        });
+
+    </script>
+</body>
+</html>
